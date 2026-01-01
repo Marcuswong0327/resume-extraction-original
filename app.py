@@ -15,7 +15,7 @@ def main():
         layout="wide"
     )
     
-    st.title("📄 Resume Parser & Analyzer")
+    st.title("📄 Resume Parser 2.0")
     st.title("💰Road to Million Biller!!!")
 
     
@@ -236,6 +236,7 @@ def generate_and_download_excel():
 
 if __name__ == "__main__":
     main()
+
 
 
 
