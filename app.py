@@ -10,7 +10,7 @@ import base64
 
 def main():
     st.set_page_config(
-        page_title="Resume Parser",
+        page_title="Resume Parser 2.0",
         page_icon="📄",
         layout="wide"
     )
@@ -236,6 +236,7 @@ def generate_and_download_excel():
 
 if __name__ == "__main__":
     main()
+
 
 
 
