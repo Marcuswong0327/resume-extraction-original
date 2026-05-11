@@ -1,7 +1,26 @@
-import requests
 import json
-import streamlit as st
+import re
 import time
+from datetime import date, datetime
+
+import requests
+import streamlit as st
+from dateutil import parser as date_parser
+from dateutil.relativedelta import relativedelta
+
+_PRESENT_END = re.compile(
+    r"^(present|current|now|till date|to date|ongoing|today)$",
+    re.IGNORECASE,
+)
+_RANGE_SPLIT = [
+    re.compile(r"\s+to\s+", re.IGNORECASE),
+    re.compile(r"\s+until\s+", re.IGNORECASE),
+    re.compile(r"\s*–\s*"),
+    re.compile(r"\s*—\s*"),
+    re.compile(r"\s*-\s*"),
+]
+_TRAILING_SPAN = re.compile(r"\s*\([^)]*\)\s*$")
+
 
 class AIParser:
     """Handle Claude Sonnet 4 API integration via OpenRouter for intelligent resume parsing"""
@@ -18,6 +37,71 @@ class AIParser:
             "Content-Type": "application/json",
             "X-Title": "Resume Parser"
         }
+
+    @staticmethod
+    def _strip_existing_span(s: str) -> str:
+        return _TRAILING_SPAN.sub("", s).strip()
+
+    @staticmethod
+    def _split_date_range(base: str) -> tuple[str | None, str | None]:
+        for pat in _RANGE_SPLIT:
+            m = pat.search(base)
+            if m:
+                left, right = base[: m.start()].strip(), base[m.end() :].strip()
+                if left and right:
+                    return left, right
+        return None, None
+
+    @staticmethod
+    def _parse_date_end(part: str) -> date | None:
+        part = part.strip()
+        if not part:
+            return None
+        if _PRESENT_END.match(part):
+            return date.today()
+        try:
+            return date_parser.parse(part, default=datetime(1900, 1, 1), fuzzy=True).date()
+        except (ValueError, OverflowError, TypeError, OSError):
+            return None
+
+    @staticmethod
+    def _span_label(start_d: date, end_d: date) -> str:
+        if end_d < start_d:
+            start_d, end_d = end_d, start_d
+        rd = relativedelta(end_d, start_d)
+        years, months, days = rd.years, rd.months, rd.days
+        parts: list[str] = []
+        if years > 0:
+            parts.append("1 year" if years == 1 else f"{years} years")
+        if months > 0:
+            parts.append("1 month" if months == 1 else f"{months} months")
+        if not parts and days > 0:
+            parts.append("1 day" if days == 1 else f"{days} days")
+        return " ".join(parts) if parts else ""
+
+    @staticmethod
+    def _append_calculated_duration(duration_raw: str) -> str:
+        """
+        Turn 'Jan 2025 - Jan 2026' into 'Jan 2025 - Jan 2026 (1 year)'.
+        If the range cannot be parsed, return "".
+        """
+        raw = (duration_raw or "").strip()
+        if not raw:
+            return ""
+        base = AIParser._strip_existing_span(raw)
+        if not base:
+            return ""
+        left, right = AIParser._split_date_range(base)
+        if not left or not right:
+            return ""
+        start_d = AIParser._parse_date_end(left)
+        end_d = AIParser._parse_date_end(right)
+        if start_d is None or end_d is None:
+            return ""
+        label = AIParser._span_label(start_d, end_d)
+        if not label:
+            return ""
+        return f"{base} ({label})"
 
     def parse_resume(self, resume_text):
 
@@ -53,33 +137,41 @@ You are an expert resume parser. Analyze the following resume text and extract s
 Resume Text:
 {resume_text}
 
-Please extract and return ONLY a valid JSON object with the following structure:
-sometimes the information maybe on second page. but majority is first page. 
+Return ONLY a valid JSON object with EXACTLY these keys (use empty string "" when unknown or not applicable):
+
 {{
-    "first name": "candidate first name, normally on top few lines of first pages",
-    "last name": "candidate last name, normallly on top few lines of first page",
-    "mobile": "phone/mobile number, near around name area",
-    "email": "email address, near around mobile phone number area",
-    "current job title": "current/most recent job title based on latest date, normally the most recent job title will be listed on first",
-    "current company": "current/most recent company name",
-    "previous job title": "previous job title (before current one), based on the date, normally second job title is before current one",
-    "previous company": "previous company name (before current one)"
+    "first name": "",
+    "last name": "",
+    "mobile": "",
+    "email": "",
+    "duration 1": "",
+    "job title 1": "",
+    "company 1": "",
+    "duration 2": "",
+    "job title 2": "",
+    "company 2": "",
+    "duration 3": "",
+    "job title 3": "",
+    "company 3": "",
+    "location": ""
 }}
 
-Instructions for determining current vs previous positions:
-1. Look for dates in the work experience section
-2. The position with the most recent dates (or "present", "current", "Now" etc.) is the CURRENT position
-3. The position immediately before the current one (chronologically) is the PREVIOUS position
-4. If only one job is mentioned, put it as current and leave previous fields as empty
-5. Pay attention to date formats like "2020-present", "Jan 2023 - Current", "2022-2024", etc.
+Ordering rules (work experience — use dates, not resume layout order):
+1. **Slot 1 (duration 1, job title 1, company 1)** = the single **most recent** role by end date (still employed if it says Present/Current/Now, or the job with the latest end month/year).
+2. **Slot 2** = the next role **older** than slot 1 (immediately before in career timeline).
+3. **Slot 3** = the next role **older** than slot 2. If the resume has **fewer than three** distinct roles, leave duration 3, job title 3, and company 3 as "".
+4. **duration N**: write **only** the employment date range as on the resume (e.g. "Jan 2022 – Present", "Jan 2025 - Jan 2026", "2019 – 2021"). **Do not** add any parenthetical length; the app will append that. If there is no clear start and end, use "".
+5. **job title N** / **company N**: title and employer for that same role as slot N.
 
-Rules:
-1. Return ONLY valid JSON, no additional text or explanations
-2. If information is not found, use empty string ""
-3. Be very careful with dates to correctly identify current vs previous positions
-4. Extract full names and split into first name and last name
-5. Look for mobile/phone numbers in various formats
-6. Be thorough and accurate in extraction
+Other fields:
+- **first name** / **last name**: from the header; split full name logically.
+- **mobile** / **email**: contact near the name/header when possible.
+- **location**: city/region/country the candidate states as current or primary (header, summary, or contact line). If none, "".
+
+General:
+- Information may appear on a second page; scan the whole text.
+- Return ONLY JSON, no markdown fences or commentary.
+- Use "" for any missing field.
 """
         return prompt
     
@@ -112,7 +204,7 @@ Rules:
                         "content": prompt
                     }
                 ],
-                "max_tokens": 200,
+                "max_tokens": 900,
                 "temperature": 0.1,
                 "stream": False
             }
@@ -185,30 +277,55 @@ Rules:
             return self._create_empty_structure()
     
     def _validate_parsed_data(self, data):
-        
-        # Ensure all required fields exist
+        def s(key: str) -> str:
+            return str(data.get(key, "") or "").strip()
+
         validated_data = {
-            "first name": str(data.get("first name", "")).strip(),
-            "last name": str(data.get("last name", "")).strip(),
-            "mobile": str(data.get("mobile", "")).strip(),
-            "email": str(data.get("email", "")).strip(),
-            "current job title": str(data.get("current job title", "")).strip(),
-            "current company": str(data.get("current company", "")).strip(),
-            "previous job title": str(data.get("previous job title", "")).strip(),
-            "previous company": str(data.get("previous company", "")).strip()
+            "first name": s("first name"),
+            "last name": s("last name"),
+            "mobile": s("mobile"),
+            "email": s("email"),
+            "duration 1": s("duration 1"),
+            "job title 1": s("job title 1"),
+            "company 1": s("company 1"),
+            "duration 2": s("duration 2"),
+            "job title 2": s("job title 2"),
+            "company 2": s("company 2"),
+            "duration 3": s("duration 3"),
+            "job title 3": s("job title 3"),
+            "company 3": s("company 3"),
+            "location": s("location"),
         }
-        
+
+        # Backward compatibility if the model returns the old two-job schema
+        if not validated_data["job title 1"] and s("current job title"):
+            validated_data["job title 1"] = s("current job title")
+            validated_data["company 1"] = s("current company")
+            validated_data["duration 1"] = s("duration 1") or s("current duration")
+        if not validated_data["job title 2"] and s("previous job title"):
+            validated_data["job title 2"] = s("previous job title")
+            validated_data["company 2"] = s("previous company")
+            validated_data["duration 2"] = s("duration 2") or s("previous duration")
+
+        for dkey in ("duration 1", "duration 2", "duration 3"):
+            validated_data[dkey] = self._append_calculated_duration(validated_data[dkey])
+
         return validated_data
-    
+
     def _create_empty_structure(self):
-        
         return {
             "first name": "",
             "last name": "",
             "mobile": "",
             "email": "",
-            "current job title": "",
-            "current company": "",
-            "previous job title": "",
-            "previous company": ""
+            "duration 1": "",
+            "job title 1": "",
+            "company 1": "",
+            "duration 2": "",
+            "job title 2": "",
+            "company 2": "",
+            "duration 3": "",
+            "job title 3": "",
+            "company 3": "",
+            "location": "",
         }
