@@ -166,6 +166,7 @@ Resume Text:
 Return ONLY a valid JSON object with EXACTLY these keys (use empty string "" when unknown or not applicable):
 
 {{
+    "role type": "",
     "first name": "",
     "last name": "",
     "mobile": "",
@@ -190,6 +191,7 @@ Ordering rules (work experience — use dates, not resume layout order):
 5. **job title N** / **company N**: title and employer for that same role as slot N.
 
 Other fields:
+- **role type**: always return "" (reserved column for downstream use).
 - **first name** / **last name**: from the header; split full name logically.
 - **mobile** / **email**: contact near the name/header when possible.
 - **location**: city/region/country the candidate states as current or primary (header, summary, or contact line). If none, "".
@@ -307,6 +309,7 @@ General:
             return str(data.get(key, "") or "").strip()
 
         validated_data = {
+            "role type": s("role type"),
             "first name": s("first name"),
             "last name": s("last name"),
             "mobile": s("mobile"),
@@ -340,6 +343,7 @@ General:
 
     def _create_empty_structure(self):
         return {
+            "role type": "",
             "first name": "",
             "last name": "",
             "mobile": "",

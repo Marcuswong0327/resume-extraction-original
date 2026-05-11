@@ -105,6 +105,7 @@ def main():
         display_data = []
         for candidate in st.session_state.processed_candidates:
             display_data.append({
+                'Role Type': candidate.get('role type', ''),
                 'First Name': candidate.get('first name', ''),
                 'Last Name': candidate.get('last name', ''),
                 'Mobile': candidate.get('mobile', ''),
