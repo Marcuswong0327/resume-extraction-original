@@ -18,33 +18,7 @@ class AIParser:
             "Content-Type": "application/json",
             "X-Title": "Resume Parser"
         }
-        
-        # Test the API connection
-        self._test_connection()
-    
-    def _test_connection(self):
 
-        try:
-            test_payload = {
-                "model": "anthropic/claude-sonnet-4",
-                "messages": [{"role": "user", "content": "Hello"}],
-                "max_tokens": 10,
-                "temperature": 0.1
-            }
-            
-            response = requests.post(
-                self.base_url,
-                headers=self.headers,
-                json=test_payload,
-                timeout=10
-            )
-            
-            if response.status_code != 200:
-                raise Exception(f"API test failed: {response.status_code} - {response.text}")
-                
-        except Exception as e:
-            raise Exception(f"OpenRouter API connection test failed: {str(e)}")
-    
     def parse_resume(self, resume_text):
 
         try:
@@ -147,7 +121,7 @@ Rules:
                 self.base_url,
                 headers=self.headers,
                 json=payload,
-                timeout=60  
+                timeout=(30, 120),
             )
             
             if response.status_code == 200:
