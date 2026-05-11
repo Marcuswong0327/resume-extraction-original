@@ -1,9 +1,12 @@
+import os
+
 import streamlit as st
 import pandas as pd
 import json
 import traceback
 from pdf_processor import PDFProcessor
 from word_processor import WordProcessor
+from text_processor import TextProcessor
 from ai_parser import AIParser
 from excel_exporter import ExcelExporter
 import base64
@@ -37,7 +40,7 @@ def main():
     with col1:
         uploaded_files = st.file_uploader(
             "Upload as many you like!",
-            type=['pdf', 'docx'],
+            type=['pdf', 'docx', 'doc', 'txt'],
             accept_multiple_files=True,
         )
         
@@ -60,7 +63,9 @@ def main():
                     process_resumes(uploaded_files)
     
     with col2:
-        st.image("linktal logo transparent copy.png", width = 350)
+        _logo = "linktal logo transparent copy.png"
+        if os.path.isfile(_logo):
+            st.image(_logo, width=350)
         st.header("Processing Status")
         
         if st.session_state.processing_in_progress:
@@ -125,6 +130,7 @@ def process_resumes(uploaded_files):
             try:
                 pdf_processor = PDFProcessor()
                 word_processor = WordProcessor()
+                text_processor = TextProcessor()
                 ai_parser = AIParser(st.secrets["DEEPSEEK_API_KEY"])
             except Exception as e:
                 st.error(f"Error initializing services: {str(e)}")
@@ -153,9 +159,12 @@ def process_resumes(uploaded_files):
                 if file_extension == 'pdf':
                     with st.spinner(f"Extracting {uploaded_file.name}..."):
                         extracted_text = pdf_processor.process_pdf_file(uploaded_file)
-                elif file_extension in ['docx']:
+                elif file_extension in ('docx', 'doc'):
                     with st.spinner(f"Extracting {uploaded_file.name}..."):
                         extracted_text = word_processor.process_word_file(uploaded_file)
+                elif file_extension == 'txt':
+                    with st.spinner(f"Reading {uploaded_file.name}..."):
+                        extracted_text = text_processor.process_text_file(uploaded_file)
                 else:
                     st.warning(f"Unsupported file type: {file_extension}")
                     continue

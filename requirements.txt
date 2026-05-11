@@ -1,8 +1,9 @@
-streamlit
-PyPDF2
-PyMuPDF
-python-docx
-pandas
-openpyxl
-python-dateutil
-numpy
+# Python deps for Streamlit Community Cloud / pip-based deploy (see package.json for convenience scripts)
+streamlit>=1.28.0
+requests>=2.28.0
+PyPDF2>=3.0.0
+python-docx>=1.0.0
+pandas>=2.0.0
+openpyxl>=3.1.0
+python-dateutil>=2.8.0
+numpy>=1.24.0
