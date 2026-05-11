@@ -1,4 +1,9 @@
 import docx
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import streamlit as st
 from io import BytesIO
 
@@ -11,40 +16,64 @@ class WordProcessor:
 
     def _extract_text_from_doc_bytes(self, doc_bytes: bytes) -> str:
         """
-        Extract plain text from a legacy .doc (binary) file using Spire.Doc (pip install only;
-        no LibreOffice or Microsoft Word on the host).
+        Extract plain text from legacy .doc using **antiword** (CLI, no .NET / no libicu).
+
+        Streamlit Community Cloud: list `antiword` in `packages.txt` (this repo includes it).
+        Local Windows: install antiword and put it on PATH, or re-save as .docx.
+
+        (Aspose.Words FOSS is MIT and avoids Word/LibreOffice, but PyPI wheels are limited by
+        Python version; antiword is the most reliable option on Linux deploys.)
         """
-        try:
-            from spire.doc import Document, FileFormat
-            from spire.doc.common import Stream
-        except ImportError:
+        exe = shutil.which("antiword")
+        if not exe:
             st.error(
-                "Legacy .doc support requires the `spire.doc` package. "
-                "Add it to requirements.txt and redeploy (e.g. `pip install spire.doc`)."
+                "Legacy **.doc** needs the **antiword** program on the machine. "
+                "For Streamlit Cloud, commit **`packages.txt`** in the repo root with a line `antiword` "
+                "and redeploy. On Windows, install [antiword](http://www.winfield.demon.nl/) and add it to PATH, "
+                "or save the file as **.docx**."
             )
             return ""
 
-        stream = None
-        doc = None
+        with tempfile.NamedTemporaryFile(suffix=".doc", delete=False) as tf:
+            tf.write(doc_bytes)
+            path = tf.name
+
         try:
-            stream = Stream(doc_bytes)
-            doc = Document(stream, FileFormat.Doc)
-            text = doc.GetText()
-            return (text or "").strip()
-        except Exception as e:
-            st.error(f"Could not read legacy .doc file: {e}")
+            run_kw: dict = {
+                "args": [exe, path],
+                "capture_output": True,
+                "timeout": 120,
+            }
+            if sys.platform == "win32" and hasattr(subprocess, "CREATE_NO_WINDOW"):
+                run_kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+            result = subprocess.run(**run_kw)
+        except (subprocess.TimeoutExpired, OSError) as e:
+            st.error(f"Could not read .doc file: {e}")
             return ""
         finally:
-            if doc is not None:
-                try:
-                    doc.Dispose()
-                except Exception:
-                    pass
-            if stream is not None:
-                try:
-                    stream.Dispose()
-                except Exception:
-                    pass
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+        if result.returncode != 0:
+            err = result.stderr or b""
+            if isinstance(err, bytes):
+                err = err.decode("latin-1", errors="replace")
+            st.error(
+                f"antiword failed (exit {result.returncode}). "
+                f"{str(err).strip() or 'The file may be corrupted or not a Word 97–2003 document.'}"
+            )
+            return ""
+
+        raw = result.stdout or b""
+        if isinstance(raw, bytes):
+            text = raw.decode("utf-8", errors="replace")
+            if not text.strip():
+                text = raw.decode("latin-1", errors="replace")
+        else:
+            text = str(raw)
+        return text.strip()
 
     def extract_text_from_docx(self, file_path_or_bytes):
         """
@@ -74,7 +103,7 @@ class WordProcessor:
 
     def process_word_file(self, uploaded_file):
         """
-        Process DOCX (python-docx) or legacy DOC (Spire.Doc text extraction).
+        Process DOCX (python-docx) or legacy .doc (antiword).
         """
         try:
             file_extension = uploaded_file.name.lower().split(".")[-1]

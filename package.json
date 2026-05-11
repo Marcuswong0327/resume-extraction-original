@@ -2,7 +2,7 @@
   "name": "resume-extraction",
   "version": "1.0.0",
   "private": true,
-  "description": "Streamlit resume parser. Python dependencies live in requirements.txt (used by Streamlit Cloud).",
+  "description": "Streamlit resume parser. Python: requirements.txt (Streamlit Cloud). Legacy .doc text uses the antiword system package — list antiword in packages.txt at repo root (not in requirements.txt or npm).",
   "scripts": {
     "start": "python -m streamlit run app.py",
     "start:open": "python -m streamlit run app.py --browser.gatherUsageStats false"
