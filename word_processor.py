@@ -1,12 +1,6 @@
 import docx
-import os
-import shutil
-import subprocess
-import sys
-import tempfile
 import streamlit as st
 from io import BytesIO
-from pathlib import Path
 
 
 class WordProcessor:
@@ -15,114 +9,42 @@ class WordProcessor:
     def __init__(self):
         pass
 
-    @staticmethod
-    def _find_libreoffice_soffice():
-        for name in ("soffice", "soffice.exe"):
-            path = shutil.which(name)
-            if path:
-                return path
-        if sys.platform == "win32":
-            for candidate in (
-                r"C:\Program Files\LibreOffice\program\soffice.exe",
-                r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
-            ):
-                if os.path.isfile(candidate):
-                    return candidate
-        return None
-
-    def _convert_doc_with_libreoffice(self, doc_bytes: bytes) -> BytesIO | None:
-        soffice = self._find_libreoffice_soffice()
-        if not soffice:
-            return None
+    def _extract_text_from_doc_bytes(self, doc_bytes: bytes) -> str:
+        """
+        Extract plain text from a legacy .doc (binary) file using Spire.Doc (pip install only;
+        no LibreOffice or Microsoft Word on the host).
+        """
         try:
-            with tempfile.TemporaryDirectory() as tmp:
-                tmp_path = Path(tmp)
-                doc_path = tmp_path / "input.doc"
-                doc_path.write_bytes(doc_bytes)
-                cmd = [
-                    soffice,
-                    "--headless",
-                    "--nologo",
-                    "--nofirststartwizard",
-                    "--convert-to",
-                    "docx",
-                    "--outdir",
-                    str(tmp_path),
-                    str(doc_path),
-                ]
-                run_kw: dict = {
-                    "check": True,
-                    "capture_output": True,
-                    "timeout": 120,
-                    "text": True,
-                }
-                if sys.platform == "win32" and hasattr(subprocess, "CREATE_NO_WINDOW"):
-                    run_kw["creationflags"] = subprocess.CREATE_NO_WINDOW
-                subprocess.run(cmd, **run_kw)
-                out_path = tmp_path / "input.docx"
-                if out_path.is_file():
-                    return BytesIO(out_path.read_bytes())
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
-            st.warning(f"LibreOffice could not convert .doc: {e}")
-        return None
-
-    def _convert_doc_with_win32com(self, doc_bytes: bytes) -> BytesIO | None:
-        try:
-            import pythoncom
-            import win32com.client
+            from spire.doc import Document, FileFormat
+            from spire.doc.common import Stream
         except ImportError:
-            return None
-        tmpdir = tempfile.mkdtemp()
+            st.error(
+                "Legacy .doc support requires the `spire.doc` package. "
+                "Add it to requirements.txt and redeploy (e.g. `pip install spire.doc`)."
+            )
+            return ""
+
+        stream = None
+        doc = None
         try:
-            in_path = os.path.abspath(os.path.join(tmpdir, "input.doc"))
-            out_path = os.path.abspath(os.path.join(tmpdir, "input.docx"))
-            with open(in_path, "wb") as f:
-                f.write(doc_bytes)
-            pythoncom.CoInitialize()
-            try:
-                word = win32com.client.Dispatch("Word.Application")
-                word.Visible = False
+            stream = Stream(doc_bytes)
+            doc = Document(stream, FileFormat.Doc)
+            text = doc.GetText()
+            return (text or "").strip()
+        except Exception as e:
+            st.error(f"Could not read legacy .doc file: {e}")
+            return ""
+        finally:
+            if doc is not None:
                 try:
-                    word.DisplayAlerts = 0
+                    doc.Dispose()
                 except Exception:
                     pass
-                doc = word.Documents.Open(
-                    in_path,
-                    ConfirmConversions=False,
-                    ReadOnly=True,
-                    AddToRecentFiles=False,
-                )
+            if stream is not None:
                 try:
-                    # 16 = wdFormatDocumentDefault (Office Open XML / .docx)
-                    doc.SaveAs2(out_path, FileFormat=16)
-                finally:
-                    doc.Close(SaveChanges=False)
-                word.Quit()
-            finally:
-                pythoncom.CoUninitialize()
-            if os.path.isfile(out_path):
-                with open(out_path, "rb") as f:
-                    return BytesIO(f.read())
-        except Exception as e:
-            st.warning(f"Microsoft Word could not convert .doc: {e}")
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-        return None
-
-    def _doc_bytes_to_docx_bytesio(self, doc_bytes: bytes) -> BytesIO | None:
-        converted = self._convert_doc_with_libreoffice(doc_bytes)
-        if converted is not None:
-            return converted
-        converted = self._convert_doc_with_win32com(doc_bytes)
-        if converted is not None:
-            return converted
-        st.error(
-            "Could not convert .doc to .docx. Install LibreOffice "
-            "(https://www.libreoffice.org/) and ensure `soffice` is on PATH, "
-            "or install Microsoft Word with pywin32 (`pip install pywin32`), "
-            "or re-save the file as .docx."
-        )
-        return None
+                    stream.Dispose()
+                except Exception:
+                    pass
 
     def extract_text_from_docx(self, file_path_or_bytes):
         """
@@ -130,15 +52,15 @@ class WordProcessor:
         Accepts a file path or BytesIO object.
         """
         try:
-            doc = docx.Document(file_path_or_bytes)
+            document = docx.Document(file_path_or_bytes)
 
             text_content = []
 
-            for paragraph in doc.paragraphs:
+            for paragraph in document.paragraphs:
                 if paragraph.text.strip():
                     text_content.append(paragraph.text.strip())
 
-            for table in doc.tables:
+            for table in document.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         if cell.text.strip():
@@ -152,7 +74,7 @@ class WordProcessor:
 
     def process_word_file(self, uploaded_file):
         """
-        Process DOCX or legacy DOC (converted via LibreOffice or Word COM), then extract text.
+        Process DOCX (python-docx) or legacy DOC (Spire.Doc text extraction).
         """
         try:
             file_extension = uploaded_file.name.lower().split(".")[-1]
@@ -163,11 +85,7 @@ class WordProcessor:
 
             if file_extension == "doc":
                 file_content = uploaded_file.read()
-                docx_io = self._doc_bytes_to_docx_bytesio(file_content)
-                if docx_io is None:
-                    return ""
-                docx_io.seek(0)
-                return self.extract_text_from_docx(docx_io)
+                return self._extract_text_from_doc_bytes(file_content)
 
             st.error(f"Unsupported file format: {file_extension}")
             return ""
