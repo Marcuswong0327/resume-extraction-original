@@ -109,11 +109,17 @@ def main():
                 'Last Name': candidate.get('last name', ''),
                 'Mobile': candidate.get('mobile', ''),
                 'Email': candidate.get('email', ''),
-                'Current Job Title': candidate.get('current job title', ''),
-                'Current Company': candidate.get('current company', ''),
-                'Previous Job Title': candidate.get('previous job title', ''),
-                'Previous Company': candidate.get('previous company', ''),
-                'Source File': candidate.get('filename', '')
+                'Duration 1': candidate.get('duration 1', ''),
+                'Job Title 1': candidate.get('job title 1', ''),
+                'Company 1': candidate.get('company 1', ''),
+                'Duration 2': candidate.get('duration 2', ''),
+                'Job Title 2': candidate.get('job title 2', ''),
+                'Company 2': candidate.get('company 2', ''),
+                'Duration 3': candidate.get('duration 3', ''),
+                'Job Title 3': candidate.get('job title 3', ''),
+                'Company 3': candidate.get('company 3', ''),
+                'Location': candidate.get('location', ''),
+                'Source File': candidate.get('filename', ''),
             })
         
         df = pd.DataFrame(display_data)
