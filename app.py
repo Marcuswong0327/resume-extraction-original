@@ -11,6 +11,10 @@ from ai_parser import AIParser
 from excel_exporter import ExcelExporter
 import base64
 
+# Hard cap: one batch cannot exceed this many files (uploader + processing).
+MAX_FILES_PER_BATCH = 300
+
+
 def main():
     st.set_page_config(
         page_title="Resume Parser 2.0",
@@ -39,12 +43,20 @@ def main():
     
     with col1:
         uploaded_files = st.file_uploader(
-            "Upload as many you like!",
+            f"Upload resumes (max {MAX_FILES_PER_BATCH} files per batch)",
             type=['pdf', 'docx', 'doc', 'txt'],
             accept_multiple_files=True,
         )
-        
-        if uploaded_files:
+
+        over_limit = bool(uploaded_files) and len(uploaded_files) > MAX_FILES_PER_BATCH
+
+        if uploaded_files and over_limit:
+            st.error(
+                f"Hard limit exceeded: at most **{MAX_FILES_PER_BATCH}** files per batch. "
+                f"You selected **{len(uploaded_files)}**. Remove files until you are at or below the limit, then upload again."
+            )
+
+        if uploaded_files and not over_limit:
             st.success(f"✅ {len(uploaded_files)} file(s) uploaded successfully")
             
             # Display uploaded files
@@ -54,7 +66,10 @@ def main():
                     st.write(f"{i}. {file.name} ({file.size} bytes) - {file_type}")
             
             # Process files button
-            process_disabled = not credentials_status['deepseek_status'] or st.session_state.processing_in_progress
+            process_disabled = (
+                not credentials_status['deepseek_status']
+                or st.session_state.processing_in_progress
+            )
             
             if st.button("Process Resumes", type="primary", use_container_width=True, disabled=process_disabled):
                 if not credentials_status['deepseek_status']:
@@ -120,6 +135,13 @@ def check_credentials():
     }
 
 def process_resumes(uploaded_files):
+    if len(uploaded_files) > MAX_FILES_PER_BATCH:
+        st.error(
+            f"Processing blocked: more than {MAX_FILES_PER_BATCH} files ({len(uploaded_files)}). "
+            "Reduce the batch size and try again."
+        )
+        return
+
     st.session_state.processing_in_progress = True
     st.session_state.processing_complete = False
     st.session_state.processed_candidates = []
