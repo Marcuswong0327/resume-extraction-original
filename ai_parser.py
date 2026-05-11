@@ -20,6 +20,7 @@ _RANGE_SPLIT = [
     re.compile(r"\s*-\s*"),
 ]
 _TRAILING_SPAN = re.compile(r"\s*\([^)]*\)\s*$")
+_YEAR_4 = re.compile(r"\b(19\d{2}|20\d{2})\b")
 
 
 class AIParser:
@@ -53,14 +54,31 @@ class AIParser:
         return None, None
 
     @staticmethod
-    def _parse_date_end(part: str) -> date | None:
+    def _years_in(s: str) -> list[int]:
+        return [int(y) for y in _YEAR_4.findall(s)]
+
+    @staticmethod
+    def _first_year_in(s: str) -> int | None:
+        m = _YEAR_4.search(s)
+        return int(m.group(1)) if m else None
+
+    @staticmethod
+    def _parse_range_token(part: str, hint_year: int | None) -> date | None:
+        """
+        Parse one side of a range. If the text has no 4-digit year, use hint_year
+        (e.g. from 'December 2018' or a single trailing year on the full range) so
+        'September' does not default to 1900.
+        """
         part = part.strip()
         if not part:
             return None
         if _PRESENT_END.match(part):
             return date.today()
+        explicit_year = AIParser._first_year_in(part)
+        y = explicit_year or hint_year or 2000
+        default = datetime(y, 6, 15)
         try:
-            return date_parser.parse(part, default=datetime(1900, 1, 1), fuzzy=True).date()
+            return date_parser.parse(part, default=default, fuzzy=True).date()
         except (ValueError, OverflowError, TypeError, OSError):
             return None
 
@@ -94,8 +112,16 @@ class AIParser:
         left, right = AIParser._split_date_range(base)
         if not left or not right:
             return ""
-        start_d = AIParser._parse_date_end(left)
-        end_d = AIParser._parse_date_end(right)
+
+        years_base = AIParser._years_in(base)
+        singleton_year = years_base[0] if len(years_base) == 1 else None
+        y_left, y_right = AIParser._first_year_in(left), AIParser._first_year_in(right)
+        # If only one year appears for the whole phrase (e.g. "Sep - Dec 2018"), use it for month-only sides.
+        hint_left = y_left or y_right or singleton_year
+        hint_right = y_right or y_left or singleton_year
+
+        start_d = AIParser._parse_range_token(left, hint_left)
+        end_d = AIParser._parse_range_token(right, hint_right)
         if start_d is None or end_d is None:
             return ""
         label = AIParser._span_label(start_d, end_d)
